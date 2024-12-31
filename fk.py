@@ -1,14 +1,11 @@
 import streamlit as st
-import time
-import random
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+import requests
+from bs4 import BeautifulSoup
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image
 from io import BytesIO
-import requests
+import time
+import random
 
 # Streamlit App
 st.title("Flipkart Product Scraper By Kumaran 🫶")
@@ -19,12 +16,34 @@ st.write("Connect with me on [LinkedIn](https://www.linkedin.com/in/elangkumaran
 product_link = st.text_input("Product Link", "https://www.flipkart.com/search?q=mobile%20phone")
 num_pages = st.number_input("Number of Pages to Scrape", min_value=1, max_value=10, value=4)
 
-if st.button("Scrape"):
-    # Initialize the Selenium WebDriver
-    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()))
+# Function to make requests with retries
+def fetch_with_retries(url, headers, retries=5):
+    for i in range(retries):
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()  # Raise an error for bad responses
+            return response
+        except requests.exceptions.RequestException as e:
+            if i < retries - 1:  # Don't wait on the last attempt
+                st.warning(f"Attempt {i + 1} failed: {e}. Retrying...")
+                time.sleep(random.uniform(1, 3))  # Wait a random time between 1 to 3 seconds
+            else:
+                st.error(f"Error fetching the URL after {retries} attempts: {e}")
+                return None
+    return None
 
+if st.button("Scrape"):
     # Create progress bar
     progress = st.progress(0)
+
+    # Set up headers
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Referer": "https://www.flipkart.com/",
+    }
 
     # Initialize workbook
     workbook = Workbook()
@@ -37,34 +56,36 @@ if st.button("Scrape"):
     base_url = product_link
 
     while base_url and page_count < num_pages:
-        # Navigate to the URL
-        driver.get(base_url)
-        time.sleep(random.uniform(3, 5))  # Wait for the page to load
-
         # Update progress bar
         progress.progress((page_count + 1) / num_pages)
         st.write(f"Scraping page: {base_url}")
 
+        response = fetch_with_retries(base_url, headers)
+        if response is None:
+            break  # Exit if the response is None after retries
+
+        soup = BeautifulSoup(response.content, "html.parser")
+
         # Scrape product details
-        products = driver.find_elements(By.CLASS_NAME, "_1AtVbE")
+        products = soup.find_all("div", {"class": "_1AtVbE"})
         st.write(f"Found {len(products)} products on page {page_count + 1}")
 
         for product in products:
             try:
                 # Extract image URL
-                image_tag = product.find_element(By.CLASS_NAME, "DByuf4")
-                image_url = image_tag.get_attribute("src") if image_tag else None
+                image_tag = product.find("img", {"class": "DByuf4"})
+                image_url = image_tag["src"] if image_tag else None
 
                 # Extract product name
-                name_tag = product.find_element(By.CLASS_NAME, "KzDlHZ")
+                name_tag = product.find("div", {"class": "KzDlHZ"})
                 product_name = name_tag.text.strip() if name_tag else "N/A"
 
                 # Extract price
-                price_tag = product.find_element(By.CLASS_NAME, "Nx9bqj _4b5DiR")
+                price_tag = product.find("div", {"class": "Nx9bqj _4b5DiR"})
                 product_price = price_tag.text.strip().replace(",", "") if price_tag else "N/A"
 
                 # Extract rating and review
-                rating_review_tag = product.find_element(By.CLASS_NAME, "hGSR34")
+                rating_review_tag = product.find("span", {"class": "hGSR34"})
                 if rating_review_tag:
                     rating_text = rating_review_tag.text
                     ratings, reviews = rating_text.split(' Ratings')[0], rating_text.split('Reviews')[0].split(' ')[-1]
@@ -73,8 +94,8 @@ if st.button("Scrape"):
                     rating_and_review = "N/A"
 
                 # Extract product link
-                link_tag = name_tag.find_element(By.XPATH, "..")  # Get parent anchor element
-                product_link = "https://www.flipkart.com" + link_tag.get_attribute("href") if link_tag else "N/A"
+                link_tag = product.find("a", {"class": "IRpwTa"})
+                product_link = "https://www.flipkart.com" + link_tag["href"] if link_tag else "N/A"
 
                 # Embed the image into Excel
                 if image_url:
@@ -100,8 +121,8 @@ if st.button("Scrape"):
 
         # Find the next page link
         try:
-            next_page = driver.find_element(By.CLASS_NAME, "_1LKTO3")
-            base_url = next_page.get_attribute("href") if next_page else None
+            next_page = soup.find("a", {"class": "_1LKTO3"})
+            base_url = "https://www.flipkart.com" + next_page["href"] if next_page else None
             page_count += 1
         except Exception as e:
             st.warning("No more pages found or an error occurred.")
@@ -120,6 +141,4 @@ if st.button("Scrape"):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    # Close the driver
-    driver.quit()
     st.success("Scraping completed!")
