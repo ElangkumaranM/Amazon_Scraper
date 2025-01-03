@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from openpyxl import Workbook
+from io import BytesIO
 import time
 import random
 
@@ -107,16 +108,18 @@ if st.button("Scrape"):
         page_count += 1
 
     # Save workbook to a BytesIO stream
-    output = BytesIO()
-    workbook.save(output)
-    output.seek(0)
+    try:
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0)
 
-    # Allow download of the Excel file
-    st.download_button(
-        label="Download Excel File",
-        data=output,
-        file_name="Amazon_Products.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-    st.success("Scraping completed!")
+        # Allow download of the Excel file
+        st.download_button(
+            label="Download Excel File",
+            data=output,
+            file_name="Amazon_Products.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        st.success("Scraping completed!")
+    except Exception as e:
+        st.error(f"Error generating Excel file: {e}")
